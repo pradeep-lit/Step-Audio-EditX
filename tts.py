@@ -13,7 +13,7 @@ from http import HTTPStatus
 import torchaudio
 
 from model_loader import model_loader, ModelSource
-from config.prompts import TTS_SYSTEM_PROMPTS, AUDIO_EDIT_SYSTEM_PROMPT
+from config.prompts import AUDIO_EDIT_CLONE_SYSTEM_PROMPT_TPL, AUDIO_EDIT_SYSTEM_PROMPT
 from stepvocoder.cosyvoice2.cli.cosyvoice import CosyVoice
 from transformers.generation.logits_process import LogitsProcessor
 from transformers.generation.utils import LogitsProcessorList
@@ -101,39 +101,8 @@ class StepAudioTTS:
         )
 
         # Use system prompts from config module
-        self.tts_sys_prompt_dict = TTS_SYSTEM_PROMPTS
+        self.edit_clone_sys_prompt_tpl = AUDIO_EDIT_CLONE_SYSTEM_PROMPT_TPL
         self.edit_sys_prompt = AUDIO_EDIT_SYSTEM_PROMPT
-
-    def get_audio_tokens(self, input_audio_data_numpy, input_audio_sample_rate):
-        """
-        Extract audio tokens using audio_tokenizer
-
-        Args:
-            input_audio_data_numpy: Audio data as numpy array
-            input_audio_sample_rate: Sample rate of the audio
-
-        Returns:
-            str: Audio tokens as string
-        """
-        # Convert numpy array to tensor if needed
-        if isinstance(input_audio_data_numpy, torch.Tensor):
-            audio_tensor = input_audio_data_numpy
-        else:
-            audio_tensor = torch.from_numpy(input_audio_data_numpy).float()
-
-        # Ensure proper shape (add batch dimension if needed)
-        if len(audio_tensor.shape) == 1:
-            audio_tensor = audio_tensor.unsqueeze(0)
-
-        # Use the correct API: wav2token returns _, vq02_codes, vq06_codes
-        _, vq02_codes, vq06_codes = self.audio_tokenizer.wav2token(audio_tensor, input_audio_sample_rate)
-
-        # Merge VQ codes to token string
-        audio_tokens = self.audio_tokenizer.merge_vq0206_to_token_str(
-            vq02_codes, vq06_codes
-        )
-
-        return audio_tokens
 
     def clone(
         self,
@@ -155,16 +124,19 @@ class StepAudioTTS:
         try:
             logger.debug(f"Starting voice cloning: {prompt_wav_path}")
             prompt_wav, sample_rate = torchaudio.load(prompt_wav_path)
-            prompt_code, prompt_token, prompt_token_len, speech_feat, speech_feat_len, speech_embedding = (
+            vq0206_codes, vq02_codes_ori, vq06_codes_ori, speech_feat, speech_feat_len, speech_embedding = (
                 self.preprocess_prompt_wav(prompt_wav_path)
             )
             prompt_speaker = self.generate_clone_voice_id(prompt_text, prompt_wav)
-
-            token_ids = self._encode_audio_tts_prompt(
+            prompt_wav_tokens = self.audio_tokenizer.merge_vq0206_to_token_str(
+                vq02_codes_ori, vq06_codes_ori
+            )
+            token_ids = self._encode_audio_edit_clone_prompt(
                 target_text,
                 prompt_text,
                 prompt_speaker,
-                prompt_code,
+                vq0206_codes,
+                prompt_wav_tokens,
             )
 
             output_ids = self.llm.generate(
@@ -176,10 +148,11 @@ class StepAudioTTS:
             )
             output_ids = output_ids[:, len(token_ids) : -1]  # skip eos token
             logger.debug("Voice cloning generation completed")
+            vq0206_codes_vocoder = torch.tensor([vq0206_codes], dtype=torch.long) - 65536
             return (
                 self.cosy_model.token2wav_nonstream(
                     output_ids - 65536,
-                    prompt_token,
+                    vq0206_codes_vocoder,
                     speech_feat.to(torch.bfloat16),
                     speech_embedding.to(torch.bfloat16),
                 ),
@@ -211,16 +184,16 @@ class StepAudioTTS:
             Tuple[torch.Tensor, int]: Edited audio tensor and sample rate
         """
         try:
-            logger.debug(f"Starting audio editing: {edit_type} - {edit_info}")
-
-            # Load input audio
-            input_audio, sample_rate = torchaudio.load(input_audio_path)
-
-            # Get audio tokens
-            audio_tokens = self.get_audio_tokens(input_audio, sample_rate)
-
+            logger.debug(f"Starting audio editing: {edit_type} - {edit_info}")            
+            vq0206_codes, vq02_codes_ori, vq06_codes_ori, speech_feat, _, speech_embedding = (
+                self.preprocess_prompt_wav(input_audio_path)
+            )
+            audio_tokens = self.audio_tokenizer.merge_vq0206_to_token_str(
+                vq02_codes_ori, vq06_codes_ori
+            )
             # Build instruction prefix based on edit type
             instruct_prefix = self._build_audio_edit_instruction(audio_text, edit_type, edit_info, text)
+            print(f"instruct_prefix: {instruct_prefix}")
 
             # Encode the complete prompt to token sequence
             prompt_tokens = self._encode_audio_edit_prompt(
@@ -238,15 +211,12 @@ class StepAudioTTS:
                 logits_processor=LogitsProcessorList([RepetitionAwareLogitsProcessor()]),
             )
             output_ids = output_ids[:, len(prompt_tokens) : -1]  # skip eos token
-
-            _, prompt_token, _, speech_feat, _, speech_embedding = (
-                self.preprocess_prompt_wav(input_audio_path)
-            )
+            vq0206_codes_vocoder = torch.tensor([vq0206_codes], dtype=torch.long) - 65536
             logger.debug("Audio editing generation completed")
             return (
                 self.cosy_model.token2wav_nonstream(
                     output_ids - 65536,
-                    prompt_token,
+                    vq0206_codes_vocoder,
                     speech_feat.to(torch.bfloat16),
                     speech_embedding.to(torch.bfloat16),
                 ),
@@ -285,16 +255,12 @@ class StepAudioTTS:
         elif edit_type == "style":
             if edit_info == "remove":
                 instruct_prefix = f"Remove any speaking styles in the following audio and the reference text is: {audio_text}\n"
-            elif edit_info in {"exaggerated","ethereal","whisper","act_coy","older"}:
-                instruct_prefix = f"Make the following audio more {edit_info} style. The text corresponding to the audio is: {audio_text}\n"
             else:
-                instruct_prefix=f"Make the following audio more {edit_info}. The text corresponding to the audio is: {audio_text}\n"
+                instruct_prefix = f"Make the following audio more {edit_info} style. The text corresponding to the audio is: {audio_text}\n"
         elif edit_type == "denoise":
             instruct_prefix = f"Remove any noise from the given audio while preserving the voice content clearly. Ensure that the speech quality remains intact with minimal distortion, and eliminate all noise from the audio."
         elif edit_type == "vad":
             instruct_prefix = f"Remove any silent portions from the given audio while preserving the voice content clearly. Ensure that the speech quality remains intact with minimal distortion, and eliminate all silence from the audio."
-        elif edit_type == "bgm":
-            instruct_prefix = f"Remove any background music (BGM) from the given audio while preserving the voice content clearly. Ensure that the speech quality remains intact with minimal distortion, and eliminate all BGM from the audio."
         elif edit_type == "paralinguistic":
             instruct_prefix = f"Add some non-verbal sounds to make the audio more natural, the new text is : {text}\n  The text corresponding to the audio is: {audio_text}\n"
         else:
@@ -331,30 +297,22 @@ class StepAudioTTS:
         history.extend([4] + qrole_toks + human_turn_toks + [3] + [4] + arole_toks)
         return history
     
-    def _encode_audio_tts_prompt(
-        self, text: str, prompt_text: str, prompt_speaker: str, prompt_code: list
+    def _encode_audio_edit_clone_prompt(
+        self, text: str, prompt_text: str, prompt_speaker: str, prompt_code: list, prompt_wav_tokens: str
     ):
-        rap_or_vocal = self.detect_instruction_name(text) in ("RAP", "哼唱")
-
-        if rap_or_vocal:
-            if "哼唱" in text:
-                prompt = self.tts_sys_prompt_dict["sys_prompt_for_vocal"]
-            else:
-                prompt = self.tts_sys_prompt_dict["sys_prompt_for_rap"]
-        elif prompt_speaker:
-            prompt = self.tts_sys_prompt_dict["sys_prompt_with_spk"].format(prompt_speaker)
-        else:
-            prompt = self.tts_sys_prompt_dict["sys_prompt_wo_spk"]
-
+        prompt = self.edit_clone_sys_prompt_tpl.format(
+            speaker=prompt_speaker,
+            prompt_text=prompt_text,
+            prompt_wav_tokens=prompt_wav_tokens
+        )
+        print(f"edit clone prompt: {prompt}")
         sys_tokens = self.tokenizer.encode(f"system\n{prompt}")
 
         history = [1]
         history.extend([4] + sys_tokens + [3])
 
         _prefix_tokens = self.tokenizer.encode("\n")
-        prompt_token_encode = self.tokenizer.encode("\n" + prompt_text)
-        prompt_tokens = prompt_token_encode[len(_prefix_tokens) :]
-
+        
         target_token_encode = self.tokenizer.encode("\n" + text)
         target_tokens = target_token_encode[len(_prefix_tokens) :]
 
@@ -363,14 +321,6 @@ class StepAudioTTS:
 
         history.extend(
             [4]
-            + qrole_toks
-            + prompt_tokens
-            + [3]
-            + [4]
-            + arole_toks
-            + prompt_code
-            + [3]
-            + [4]
             + qrole_toks
             + target_tokens
             + [3]
@@ -410,20 +360,17 @@ class StepAudioTTS:
         prompt_wav, prompt_wav_sr = torchaudio.load(prompt_wav_path)
         if prompt_wav.shape[0] > 1:
             prompt_wav = prompt_wav.mean(dim=0, keepdim=True)  # 将多通道音频转换为单通道
-        prompt_token, prompt_token_len = self.cosy_model.frontend.extract_speech_token(
-            prompt_wav, prompt_wav_sr
-        )
         speech_feat, speech_feat_len = self.cosy_model.frontend.extract_speech_feat(
             prompt_wav, prompt_wav_sr
         )
         speech_embedding = self.cosy_model.frontend.extract_spk_embedding(
             prompt_wav, prompt_wav_sr
         )
-        prompt_code, _, _ = self.audio_tokenizer.wav2token(prompt_wav, prompt_wav_sr)
+        vq0206_codes, vq02_codes_ori, vq06_codes_ori = self.audio_tokenizer.wav2token(prompt_wav, prompt_wav_sr)
         return (
-            prompt_code,
-            prompt_token,
-            prompt_token_len,
+            vq0206_codes,
+            vq02_codes_ori,
+            vq06_codes_ori,
             speech_feat,
             speech_feat_len,
             speech_embedding,

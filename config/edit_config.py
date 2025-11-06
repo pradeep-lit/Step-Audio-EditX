@@ -23,10 +23,10 @@ def get_supported_edit_types():
             'generous', 'act_coy', 'warm', 'shy', 'comfort', 'authority',
             'chat', 'radio', 'soulful', 'story', 'vivid', 'program',
             'news', 'advertising', 'roar', 'murmur', 'shout', 'deeply', 'loudly',
-            'remove'
+            'remove', 'exaggerated'
         ],
         "vad": [],
         "denoise": [],
-        "para-linguistic": [],
+        "paralinguistic": [],
         "speed": ["faster", "slower", "more faster", "more slower"],
     }

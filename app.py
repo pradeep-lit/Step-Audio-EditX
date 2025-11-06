@@ -159,7 +159,7 @@ class EditxTab:
                 self.logger.debug(f"Using previous audio from history, count: {len(state['history_audio'])}")
 
             # For para-linguistic, use generated_text; otherwise use source text
-            if edit_type not in {"para-linguistic"}:
+            if edit_type not in {"paralinguistic"}:
                 generated_text = text_to_use
 
             # Use common_tts_engine for editing
@@ -224,14 +224,14 @@ class EditxTab:
             with gr.Row():
                 with gr.Column():
                     self.model_input = gr.Textbox(label="Model Name", value="Step-Audio-EditX", scale=1)
-                    self.prompt_text_input = gr.Textbox(label="Audio Text Content", value="", scale=1)
+                    self.prompt_text_input = gr.Textbox(label="Prompt Text", value="", scale=1)
                     self.prompt_audio_input = gr.Audio(
                         sources=["upload", "microphone"],
                         format="wav",
                         type="filepath",
                         label="Input Audio",
                     )
-                    self.generated_text = gr.Textbox(label="Clone Text", lines=1, max_lines=200)
+                    self.generated_text = gr.Textbox(label="Target Text", lines=1, max_lines=200, max_length=100)
                     with gr.Row():
                         self.button_tts = gr.Button("CLONE")
                         self.button_edit = gr.Button("EDIT")
