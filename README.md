@@ -31,7 +31,7 @@ We are open-sourcing Step-Audio-EditX, a powerful LLM-based audio model speciali
 ## Features
 - **Zero-Shot TTS**
   - Excellent zero-shot TTS cloning for Mandarin, English, Sichuanese, and Cantonese.
-  - To use a dialect, just add a **[Cantonese]** or **[Sichuanese]** tag before your text.
+  - To use a dialect, just add a **[Sichuanese]** or **[Cantonese]** tag before your text.
  
     
 - **Emotion and Speaking Style Editing**
