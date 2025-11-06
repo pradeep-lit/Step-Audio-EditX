@@ -6,7 +6,7 @@
 <div align="center">
   <a href="https://arxiv.org/abs/2511.03601"><img src="https://img.shields.io/static/v1?label=Tech%20Report&message=Arxiv&color=red"></a> &ensp;
   <a href="https://huggingface.co/stepfun-ai/Step-Audio-EditX"><img src="https://img.shields.io/static/v1?label=Step-Audio-EditX&message=HuggingFace&color=yellow"></a> &ensp;
-  <a href="https://huggingface.co/spaces/stepfun-ai/Step-Audio-EditX"><img src="https://img.shields.io/static/v1?label=Online%20Demo&message=HuggingFace&color=yellow"></a> &ensp;
+  <a href="https://huggingface.co/spaces/stepfun-ai/Step-Audio-EditX"><img src="https://img.shields.io/static/v1?label=Space%20Playground&message=HuggingFace&color=yellow"></a> &ensp;
 </div>
 
 ## 🔥🔥🔥 News!!
@@ -17,13 +17,14 @@ We are open-sourcing Step-Audio-EditX, a powerful LLM-based audio model speciali
 
 
 ## 📑 Open-source Plan
-- [ ] Inference Code
-- [ ] Online demo (Gradio)
+- [x] Inference Code
+- [x] Online demo (Gradio)
+- [ ] Step-Audio-Edit-Benchmark
 - [x] Model Checkpoints
   - [x] Step-Audio-Tokenizer
   - [ ] Step-Audio-EditX
   - [ ] Step-Audio-EditX-Int8
-
+  
 ## Model Download
 
 | Models   | 🤗 Hugging Face | ModelScope |
@@ -95,6 +96,27 @@ Assume you have 4 GPUs available and have already downloaded all the models.
 # Step-Audio-EditX demo
 python app.py --model-path where_you_download_dir --model-source local 
 ```
+
+## Technical Details
+<img src="assets/architechture.png" width=900>
+Step-Audio-EditX comprises three primary components: 
+
+- A dual-codebook audio tokenizer, which converts reference or input audio into discrete tokens.
+- An audio LLM that generates dual-codebook token sequences.
+- An audio decoder, which converts the dual-codebook token sequences predicted by the audio LLM back into audio waveforms using a flow matching approach.
+
+Audio-Edit enables iterative control over emotion and speaking style across all voices, leveraging large-margin data during SFT and PPO training.
+
+## Evaluation
+
+### Comparison between Step-Audio-EditX and Closed-Source models.
+
+- Step-Audio-EditX demonstrates superior performance over Minimax and Doubao in both zero-shot cloning and emotion control.
+- Emotion editing of Step-Audio-EditX significantly improves the emotion-controlled audio outputs of all three models after just one iteration. With further iterations, their overall performance continues to improve.
+
+
+<img src="assets/emotion-eval.png" width=800 >
+
 
 ## Acknowledgements
 
