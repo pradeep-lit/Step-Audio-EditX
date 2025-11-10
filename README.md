@@ -163,6 +163,7 @@ The following table shows the requirements for running Step-Audio-EditX model (b
 
 * An NVIDIA GPU with CUDA support is required.
   * The model is tested on a single L40S GPU.
+  * 12GB is just a critical value, and 16GB GPU memory shoule be safer. 
 * Tested operating system: Linux
 
 ### 🔧 Dependencies and Installation
